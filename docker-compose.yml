@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jobpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobpilot}
+      POSTGRES_DB: ${POSTGRES_DB:-jobpilot}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobpilot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      SECRET_KEY: ${SECRET_KEY:-change-me-dev-secret-key}
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-jwt-secret}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  # Runs Rapid Apply cycles (and any other future async task) outside the
+  # request/response cycle — the same app.services.rapid_apply_service
+  # code the manual POST /rapid-apply/run-cycle endpoint calls, just
+  # triggered by celery beat below instead of a user click.
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      SKIP_MIGRATIONS: "true"  # the backend service already runs `alembic upgrade head`
+      SECRET_KEY: ${SECRET_KEY:-change-me-dev-secret-key}
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-jwt-secret}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      REDIS_URL: redis://redis:6379/0
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      MOCK_FORM_BASE_URL: http://backend:8000
+    volumes:
+      - ./backend:/app
+
+  # Schedules the worker's "rapid_apply.run_cycle" task every minute (spec
+  # section 57's watcher cadence) — see celery_app.conf.beat_schedule.
+  beat:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      SKIP_MIGRATIONS: "true"
+      SECRET_KEY: ${SECRET_KEY:-change-me-dev-secret-key}
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-jwt-secret}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+
+volumes:
+  postgres_data:
