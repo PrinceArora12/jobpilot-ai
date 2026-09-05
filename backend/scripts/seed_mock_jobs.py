@@ -3,11 +3,12 @@ Populates the mock job board with a handful of realistic postings so a
 fresh install has something to search/match/apply against.
 """
 import asyncio
+import os
 import sys
 
 import httpx
 
-BASE_URL = "http://localhost:8000/api"
+BASE_URL = os.environ.get("SEED_BASE_URL", "http://localhost:8000/api")
 
 MOCK_JOBS = [
     {
