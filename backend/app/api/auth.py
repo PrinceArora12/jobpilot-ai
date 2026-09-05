@@ -5,7 +5,11 @@ Passwords are hashed with bcrypt (app.core.security) before storage.
 JobPilot AI never stores plaintext passwords, and this module has nothing
 to do with any external job portal's credentials (spec section 6/51).
 """
+import secrets
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,9 +22,25 @@ from app.models.user import User
 from app.schemas.auth import Token, TokenWithUser
 from app.schemas.user import UserLogin, UserRead, UserRegister
 from app.services.audit_service import log_action
+from app.services.email_service import send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger(__name__)
+
+VERIFICATION_TOKEN_TTL_HOURS = 24
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+def _issue_verification_token(user: User) -> str:
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.verification_token_expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=VERIFICATION_TOKEN_TTL_HOURS
+    )
+    return token
 
 
 def _client_ip(request: Request) -> str | None:
@@ -44,6 +64,7 @@ async def register(payload: UserRegister, request: Request, db: AsyncSession = D
         first_name=payload.first_name,
         last_name=payload.last_name,
     )
+    verification_token = _issue_verification_token(user)
     db.add(user)
     await db.flush()
     await log_action(db, "auth.register", user_id=user.id, ip_address=_client_ip(request))
@@ -51,6 +72,9 @@ async def register(payload: UserRegister, request: Request, db: AsyncSession = D
     await db.refresh(user)
 
     logger.info("user_registered", user_id=str(user.id), email=user.email)
+    # Best-effort: send_verification_email never raises (see email_service),
+    # so a misconfigured/unreachable SMTP server can't block registration.
+    send_verification_email(user.email, verification_token)
 
     token = create_access_token(subject=str(user.id))
     return TokenWithUser(access_token=token, user=UserRead.model_validate(user))
@@ -96,3 +120,49 @@ async def login(payload: UserLogin, request: Request, db: AsyncSession = Depends
 @router.get("/me", response_model=UserRead)
 async def read_me(current_user: User = Depends(get_current_user)):
     return UserRead.model_validate(current_user)
+
+
+@router.get("/verify-email", response_model=MessageResponse)
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.verification_token == token))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or already-used verification link")
+
+    expires_at = user.verification_token_expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at is None or expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification link has expired. Request a new one from the app.",
+        )
+
+    user.is_verified = True
+    user.verification_token = None
+    user.verification_token_expires_at = None
+    await log_action(db, "auth.email_verified", user_id=user.id)
+    await db.commit()
+
+    logger.info("user_email_verified", user_id=str(user.id), email=user.email)
+    return MessageResponse(message="Email verified successfully.")
+
+
+@router.post(
+    "/resend-verification",
+    response_model=MessageResponse,
+    dependencies=[Depends(rate_limit("auth_resend_verification", limit=5, window_seconds=300))],
+)
+async def resend_verification(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    if current_user.is_verified:
+        return MessageResponse(message="Your email is already verified.")
+
+    token = _issue_verification_token(current_user)
+    await db.commit()
+    send_verification_email(current_user.email, token)
+
+    logger.info("verification_email_resent", user_id=str(current_user.id))
+    return MessageResponse(message="Verification email sent. Check your inbox.")

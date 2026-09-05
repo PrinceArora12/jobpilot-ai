@@ -107,6 +107,21 @@ class Settings(BaseSettings):
     EMAIL_API_KEY: str = ""
     EMAIL_FROM: str = "noreply@jobpilot.ai"
 
+    # Email verification -- sent via SMTP (Gmail by default: smtp.gmail.com).
+    # SMTP_USER/SMTP_PASSWORD blank = sending is skipped (logged as a
+    # warning, not fatal) so registration always still works even before
+    # email is configured. For Gmail: SMTP_USER is your full Gmail address,
+    # SMTP_PASSWORD is a 16-character "App Password" generated at
+    # https://myaccount.google.com/apppasswords -- NOT your normal Gmail
+    # password (Google rejects that for SMTP from third-party code).
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    # Your deployed frontend's URL (no trailing slash) -- used to build the
+    # verification link emailed to new users, e.g. https://jobplot-ai.netlify.app
+    FRONTEND_URL: str = "http://localhost:5173"
+
     # Storage
     STORAGE_URL: str = "./storage"
     STORAGE_BACKEND: str = "local"

@@ -10,18 +10,57 @@ import {
   LogOut,
   Rocket,
   Settings,
+  TriangleAlert,
   User as UserIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "@/hooks/useAuth";
+import { resendVerificationEmail } from "@/services/auth";
 import {
   getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
 } from "@/services/automation";
+
+function VerifyEmailBanner() {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleResend = async () => {
+    setSending(true);
+    try {
+      await resendVerificationEmail();
+      setSent(true);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200">
+      <div className="flex items-center gap-2">
+        <TriangleAlert size={14} />
+        <span>
+          {sent
+            ? "Verification email sent — check your inbox (and spam folder)."
+            : "Please verify your email address to secure your account."}
+        </span>
+      </div>
+      {!sent && (
+        <button
+          onClick={handleResend}
+          disabled={sending}
+          className="font-medium underline decoration-dotted underline-offset-2 hover:text-amber-950 disabled:opacity-60 dark:hover:text-amber-100"
+        >
+          {sending ? "Sending..." : "Resend verification email"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -187,6 +226,7 @@ export default function AppLayout() {
         <div className="flex items-center justify-end border-b border-slate-200 bg-white px-6 py-2.5 dark:border-slate-800 dark:bg-slate-900">
           <NotificationBell />
         </div>
+        {user && !user.is_verified && <VerifyEmailBanner />}
         <Outlet />
       </main>
     </div>

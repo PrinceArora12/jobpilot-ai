@@ -11,6 +11,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, firstName?: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -48,9 +49,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    if (!tokenStorage.get()) return;
+    try {
+      setUser(await fetchCurrentUser());
+    } catch {
+      // ignore -- transient failure, keep whatever user state we already have
+    }
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, login, register, logout }}
+      value={{ user, isLoading, isAuthenticated: !!user, login, register, logout, refreshUser }}
     >
       {children}
     </AuthContext.Provider>

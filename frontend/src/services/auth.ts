@@ -27,3 +27,13 @@ export async function fetchCurrentUser(): Promise<User> {
   const { data } = await api.get<User>("/auth/me");
   return data;
 }
+
+export async function verifyEmail(token: string): Promise<{ message: string }> {
+  const { data } = await api.get<{ message: string }>("/auth/verify-email", { params: { token } });
+  return data;
+}
+
+export async function resendVerificationEmail(): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>("/auth/resend-verification");
+  return data;
+}

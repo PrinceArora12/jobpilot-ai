@@ -13,7 +13,8 @@ export default function Jobs() {
     q: string;
     employment_type: string;
     remote: string;
-  }>({ q: "", employment_type: "", remote: "" });
+    location: string;
+  }>({ q: "", employment_type: "", remote: "", location: "" });
   const [isSyncing, setIsSyncing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
 
@@ -24,6 +25,7 @@ export default function Jobs() {
         q: filters.q || undefined,
         employment_type: filters.employment_type || undefined,
         remote: filters.remote === "" ? undefined : filters.remote === "true",
+        location: filters.location || undefined,
       }),
   });
 
@@ -100,6 +102,12 @@ export default function Jobs() {
             className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-800"
           />
         </div>
+        <input
+          value={filters.location}
+          onChange={(e) => setFilters((f) => ({ ...f, location: e.target.value }))}
+          placeholder="Location (e.g. India, Bengaluru, Remote)"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+        />
         <select
           value={filters.employment_type}
           onChange={(e) => setFilters((f) => ({ ...f, employment_type: e.target.value }))}
