@@ -11,7 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
+from app.connectors.arbeitnow import ArbeitnowAdapter
+from app.connectors.base import JobSource
+from app.connectors.greenhouse import GreenhouseAdapter
+from app.connectors.jsearch import JSearchAdapter
+from app.connectors.lever import LeverAdapter
 from app.connectors.mock_source import MockJobSource
+from app.connectors.remoteok import RemoteOKAdapter
+from app.connectors.remotive import RemotiveAdapter
+from app.core.config import settings
+from app.core.logging import get_logger
 from app.database.session import get_db
 from app.models.job import Company, Job
 from app.models.user import User
@@ -19,6 +28,7 @@ from app.schemas.job import JobListResponse, JobRead
 from app.services.job_ingestion import ingest_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = get_logger(__name__)
 
 
 @router.get("", response_model=JobListResponse)
@@ -99,3 +109,48 @@ async def sync_mock_source(user: User = Depends(get_current_user), db: AsyncSess
         )
         ingested = list(result.scalars().all())
     return ingested
+
+
+@router.post("/sync/live", response_model=list[JobRead])
+async def sync_live_sources(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Pulls fresh postings from every real source configured via
+    GREENHOUSE_BOARD_TOKENS / LEVER_COMPANY_SLUGS (see app/core/config.py)
+    through the same ingestion pipeline as the mock source -- both APIs are
+    public and unauthenticated, so no keys are required. Safe to call
+    repeatedly: ingest_job() dedupes against rows already stored. A single
+    misconfigured/renamed token only skips that one source rather than
+    failing the whole sync."""
+    sources: list[JobSource] = [
+        *(GreenhouseAdapter(token) for token in settings.greenhouse_board_tokens_list),
+        *(LeverAdapter(slug) for slug in settings.lever_company_slugs_list),
+        # Free + keyless -- always run, nothing to configure.
+        RemotiveAdapter(),
+        RemoteOKAdapter(),
+        ArbeitnowAdapter(),
+        # LinkedIn/Naukri/Indeed have no free API and forbid scraping in
+        # their ToS, so JSearch (aggregating Google for Jobs, which indexes
+        # those sites) stands in for them -- only runs once a free RapidAPI
+        # key + at least one search query are configured.
+        *(
+            JSearchAdapter(query=query, api_key=settings.JSEARCH_API_KEY)
+            for query in (settings.jsearch_queries_list if settings.JSEARCH_API_KEY else [])
+        ),
+    ]
+
+    ingested_ids: list[uuid.UUID] = []
+    for source in sources:
+        try:
+            raw_jobs = await source.fetch_jobs()
+        except Exception as exc:
+            logger.warning("live_source_fetch_failed", source=source.source_name, error=str(exc))
+            continue
+        for raw in raw_jobs:
+            job, _created = await ingest_job(db, raw, source=source.source_name)
+            ingested_ids.append(job.id)
+
+    if not ingested_ids:
+        return []
+    result = await db.execute(
+        select(Job).options(selectinload(Job.company)).where(Job.id.in_(ingested_ids))
+    )
+    return list(result.scalars().all())

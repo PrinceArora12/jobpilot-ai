@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Database
-        # Database
     DATABASE_URL: str = "postgresql+asyncpg://jobpilot:jobpilot@localhost:5432/jobpilot"
     DATABASE_URL_SYNC: str = "postgresql+psycopg2://jobpilot:jobpilot@localhost:5432/jobpilot"
 
@@ -37,21 +36,23 @@ class Settings(BaseSettings):
     @classmethod
     def _ensure_asyncpg_driver(cls, v: str) -> str:
         # Managed Postgres providers (Render, Railway, Heroku, ...) hand you
-        # a bare postgres:// or postgresql:// connection string with no
-        # driver -- SQLAlchemy needs +asyncpg/+psycopg2 or it errors.
+        # a bare `postgres://` or `postgresql://` connection string with no
+        # driver — SQLAlchemy has no dialect named "postgres" and raises a
+        # cryptic NoSuchModuleError if you paste that in as-is. Normalize it
+        # so pasting the provider's raw URL into DATABASE_URL just works.
         if v.startswith("postgres://"):
-            return "postgresql+asyncpg://" + v[len("postgres://"):]
+            return "postgresql+asyncpg://" + v[len("postgres://") :]
         if v.startswith("postgresql://"):
-            return "postgresql+asyncpg://" + v[len("postgresql://"):]
+            return "postgresql+asyncpg://" + v[len("postgresql://") :]
         return v
 
     @field_validator("DATABASE_URL_SYNC", mode="after")
     @classmethod
     def _ensure_psycopg2_driver(cls, v: str) -> str:
         if v.startswith("postgres://"):
-            return "postgresql+psycopg2://" + v[len("postgres://"):]
+            return "postgresql+psycopg2://" + v[len("postgres://") :]
         if v.startswith("postgresql://"):
-            return "postgresql+psycopg2://" + v[len("postgresql://"):]
+            return "postgresql+psycopg2://" + v[len("postgresql://") :]
         return v
 
     # Redis
@@ -63,6 +64,39 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+
+    # Real job sources (Greenhouse/Lever) -- comma-separated identifiers, no
+    # keys needed since both APIs are public and unauthenticated. Find a
+    # company's value by opening its careers page:
+    #   Greenhouse: careers.<company>.com usually redirects to (or embeds)
+    #   boards.greenhouse.io/<token>          -> GREENHOUSE_BOARD_TOKENS
+    #   Lever:      jobs.lever.co/<slug>      -> LEVER_COMPANY_SLUGS
+    GREENHOUSE_BOARD_TOKENS: str = ""
+    LEVER_COMPANY_SLUGS: str = ""
+
+    @property
+    def greenhouse_board_tokens_list(self) -> List[str]:
+        return [t.strip() for t in self.GREENHOUSE_BOARD_TOKENS.split(",") if t.strip()]
+
+    @property
+    def lever_company_slugs_list(self) -> List[str]:
+        return [s.strip() for s in self.LEVER_COMPANY_SLUGS.split(",") if s.strip()]
+
+    # Remotive, RemoteOK and Arbeitnow are free + keyless and always included
+    # in /jobs/sync/live -- nothing to configure. LinkedIn, Naukri and Indeed
+    # have no free public API and explicitly prohibit scraping in their
+    # Terms of Service, so JobPilot AI never talks to them directly. JSearch
+    # (RapidAPI) is the compliant substitute: it aggregates Google for Jobs,
+    # which itself indexes LinkedIn/Indeed/Naukri postings, through one
+    # legitimate API with a free tier. Sign up at
+    # https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch for a key; leave
+    # blank to skip it entirely.
+    JSEARCH_API_KEY: str = ""
+    JSEARCH_QUERIES: str = ""  # comma-separated, e.g. "backend engineer India,react developer remote"
+
+    @property
+    def jsearch_queries_list(self) -> List[str]:
+        return [q.strip() for q in self.JSEARCH_QUERIES.split(",") if q.strip()]
 
     # AI abstraction layer
     AI_PROVIDER: str = "mock"

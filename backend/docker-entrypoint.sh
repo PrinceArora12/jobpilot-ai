@@ -12,8 +12,8 @@ if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-    echo "Starting API server..."
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    echo "Starting API server on port ${PORT:-8000}..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
 fi
 
 # docker-compose overrides `command:` for the worker/beat services (Celery)

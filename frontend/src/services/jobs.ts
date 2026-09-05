@@ -25,3 +25,8 @@ export async function syncMockJobs(): Promise<Job[]> {
   const { data } = await api.post<Job[]>("/jobs/sync/mock");
   return data;
 }
+
+export async function syncLiveJobs(): Promise<Job[]> {
+  const { data } = await api.post<Job[]>("/jobs/sync/live");
+  return data;
+}

@@ -3,7 +3,7 @@ import { RefreshCw, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import JobCard from "@/components/JobCard";
-import { searchJobs, syncMockJobs } from "@/services/jobs";
+import { searchJobs, syncLiveJobs, syncMockJobs } from "@/services/jobs";
 import { computeAllMatches, listMatches } from "@/services/matches";
 import { EMPLOYMENT_TYPES } from "@/types/jobConstants";
 
@@ -36,7 +36,12 @@ export default function Jobs() {
   const handleSync = async () => {
     setIsSyncing(true);
     try {
-      await syncMockJobs();
+      // Run both: mock always exists for the demo pipeline, live pulls
+      // from any Greenhouse/Lever sources configured on the backend
+      // (GREENHOUSE_BOARD_TOKENS / LEVER_COMPANY_SLUGS). allSettled so one
+      // failing (e.g. no live sources configured yet) doesn't block the
+      // other.
+      await Promise.allSettled([syncMockJobs(), syncLiveJobs()]);
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
       await refetch();
     } finally {
@@ -67,7 +72,7 @@ export default function Jobs() {
           <button
             onClick={handleSync}
             disabled={isSyncing}
-            title="Pull in any newly published mock jobs"
+            title="Pull in newly published mock jobs and any live sources you've configured"
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             <RefreshCw size={15} className={isSyncing ? "animate-spin" : ""} />

@@ -1,3 +1,19 @@
+# Render "Blueprint" — deploys the JobPilot AI backend, a free Postgres
+# database, and a free Redis-compatible Key Value store with one click
+# (Render dashboard -> New -> Blueprint -> point at this repo).
+#
+# Deliberately NOT included here: the Celery `worker`/`beat` services from
+# docker-compose.yml. Render's free tier does not support Background Worker
+# services (paid only) -- and this backend doesn't need them to function:
+# every Celery task (app/worker/tasks.py) just wraps a plain async function
+# that the API already calls directly and synchronously for its manual
+# endpoints (POST /api/jobs/sync/mock, POST /api/rapid-apply/run-cycle --
+# see app/api/rapid_apply.py). Running those from the "Sync sources" / rapid
+# apply screens in the UI covers the same functionality; the only thing you
+# lose versus docker-compose is the automatic once-a-minute background
+# trigger, which is fine for personal/single-user use. If you ever want
+# that back, add a `worker`/`beat` service block here on a paid instance
+# type and it'll pick up the same Dockerfile.
 databases:
   - name: jobpilot-db
     plan: free
@@ -8,6 +24,11 @@ services:
   - type: keyvalue
     name: jobpilot-redis
     plan: free
+    # Render's Key Value (their current name for what used to be a plain
+    # "Redis" service type) requires an explicit IP allow list even though
+    # only the backend service below ever talks to it over Render's
+    # internal network. This keeps it reachable; add stricter CIDR ranges
+    # here later if you want to lock it down further.
     ipAllowList:
       - source: 0.0.0.0/0
         description: allow all (internal use only in this setup)
@@ -43,7 +64,40 @@ services:
           property: connectionString
       - key: AI_PROVIDER
         value: mock
+      # Real job sources — Greenhouse and Lever both expose free, public,
+      # unauthenticated APIs (no key needed). Add comma-separated tokens to
+      # pull real live postings; clicking "Sync sources" in the UI drains
+      # them the same way it drains the mock board. Leave blank to skip.
+      #   Greenhouse token: from a company's boards.greenhouse.io/<TOKEN> URL
+      #   Lever slug:       from a company's jobs.lever.co/<SLUG> URL
+      - key: GREENHOUSE_BOARD_TOKENS
+        value: ""
+      - key: LEVER_COMPANY_SLUGS
+        value: ""
+      # Remotive/RemoteOK/Arbeitnow need no config -- they run automatically.
+      # LinkedIn/Naukri/Indeed have no free API and forbid scraping in their
+      # ToS; JSearch (RapidAPI, free tier) substitutes by surfacing Google
+      # for Jobs results, which include postings originally listed on those
+      # sites. Get a free key at
+      # https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch and add
+      # comma-separated search queries, e.g. "backend engineer India".
+      - key: JSEARCH_API_KEY
+        value: ""
+      - key: JSEARCH_QUERIES
+        value: ""
+      # Set this to your Netlify site URL once you have it, e.g.
+      # https://jobpilot-ai-yourname.netlify.app (no trailing slash). A
+      # comma-separated list is fine if you need more than one origin.
       - key: CORS_ORIGINS
         value: http://localhost:5173
+      # This backend serves its own mock application-form endpoints
+      # (app/api/mock_forms.py) that Rapid Apply's browser automation
+      # targets -- it must always point at this same service's own public
+      # URL, never anything external. Render only assigns your service's
+      # real *.onrender.com URL after the first deploy, so this can't be
+      # wired up automatically here: after your first successful deploy,
+      # copy the URL shown at the top of this service's Render dashboard
+      # (e.g. https://jobpilot-backend-xxxx.onrender.com, no trailing
+      # slash) into this value and save -- Render will redeploy with it.
       - key: MOCK_FORM_BASE_URL
         value: https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com
